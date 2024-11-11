@@ -1,0 +1,1 @@
+# notification_manager.py: Sets and triggers user-configured notifications for events.

@@ -1,0 +1,1 @@
+# calendar_viewer.py: Manages the display of events in a unified view and handles event customizations.

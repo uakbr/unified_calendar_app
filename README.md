@@ -1,0 +1,3 @@
+# Unified Calendar Application
+
+This application aggregates multiple .ics calendar links to create a privacy-preserving, unified calendar view...

@@ -1,0 +1,1 @@
+# test_gui.py: GUI component testing for display and user interaction.

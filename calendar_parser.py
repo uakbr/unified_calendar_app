@@ -1,0 +1,1 @@
+# calendar_parser.py: Parses and aggregates events from .ics calendar URLs.

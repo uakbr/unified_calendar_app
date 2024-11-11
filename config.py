@@ -1,0 +1,1 @@
+# config.py: Loads and saves user preferences for calendar display and notifications.

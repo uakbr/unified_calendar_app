@@ -1,4 +1,24 @@
 {
-    "notification_time": 10,
-    "show_all_day_events": true
+    "calendar_sources": {
+        "default_calendar": {
+            "url": "",
+            "color": "#4285F4",
+            "enabled": true,
+            "name": "My Calendar"
+        }
+    },
+    "notifications": {
+        "default_time": 600,
+        "enabled": true,
+        "sound_enabled": true,
+        "custom_times": {}
+    },
+    "display": {
+        "show_all_day_events": true,
+        "show_completed_events": false,
+        "default_view": "week",
+        "time_format": "24h"
+    },
+    "last_sync": null,
+    "config_version": "1.0"
 }

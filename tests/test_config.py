@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 import tempfile
 import os
+from unittest.mock import patch, mock_open
 from config import (
     CalendarConfig,
     CalendarSource,
@@ -16,11 +17,10 @@ from config import (
 class TestConfig(unittest.TestCase):
     def setUp(self):
         """Setup test environment before each test."""
-        # Create temporary directory for test config files
         self.temp_dir = tempfile.mkdtemp()
         self.config_path = Path(self.temp_dir) / "test_config.json"
         
-        # Sample configuration data
+        # Sample valid configuration
         self.sample_config = {
             'calendar_sources': {
                 'source1': {
@@ -28,21 +28,14 @@ class TestConfig(unittest.TestCase):
                     'color': '#FF0000',
                     'enabled': True,
                     'name': 'Test Calendar 1'
-                },
-                'source2': {
-                    'url': 'http://test2.com/calendar.ics',
-                    'color': '#00FF00',
-                    'enabled': False,
-                    'name': 'Test Calendar 2'
                 }
             },
             'notifications': {
-                'default_time': 600,  # 10 minutes in seconds
+                'default_time': 600,
                 'enabled': True,
                 'sound_enabled': True,
                 'custom_times': {
-                    'event1': 300,  # 5 minutes in seconds
-                    'event2': 1800  # 30 minutes in seconds
+                    'event1': 300
                 }
             },
             'display': {
@@ -63,29 +56,109 @@ class TestConfig(unittest.TestCase):
         except OSError:
             pass
 
-    def test_load_valid_config(self):
-        """Test loading a valid configuration file."""
-        # Write sample config to file
-        with open(self.config_path, 'w') as f:
-            json.dump(self.sample_config, f)
-        
-        # Load config
-        config = CalendarConfig.load(self.config_path)
-        
-        # Verify loaded data
-        self.assertEqual(len(config.calendar_sources), 2)
-        self.assertEqual(config.calendar_sources['source1'].url, 'http://test1.com/calendar.ics')
-        self.assertEqual(config.notifications.default_time, timedelta(minutes=10))
-        self.assertEqual(config.display.default_view, 'week')
-        self.assertEqual(config.last_sync, 1234567890.0)
+    def test_color_validation(self):
+        """Test color format validation."""
+        # Valid colors
+        valid_colors = ['#FF0000', '#00ff00', '#0000FF', '#123456']
+        for color in valid_colors:
+            source = CalendarSource(url='http://test.com', color=color)
+            self.assertEqual(source.color, color)
 
-    def test_save_config(self):
-        """Test saving configuration to file."""
-        config = CalendarConfig(
+        # Invalid colors
+        invalid_colors = ['FF0000', '#FFG000', '#FF00', '#FF0000FF', 'red']
+        for color in invalid_colors:
+            with self.assertRaises(ConfigValidationError):
+                CalendarSource(url='http://test.com', color=color)
+
+    def test_time_format_validation(self):
+        """Test time format validation."""
+        # Valid formats
+        valid_formats = ['12h', '24h']
+        for format in valid_formats:
+            settings = DisplaySettings(time_format=format)
+            self.assertEqual(settings.time_format, format)
+
+        # Invalid format
+        with self.assertRaises(ConfigValidationError):
+            DisplaySettings(time_format='invalid')
+
+    def test_view_mode_validation(self):
+        """Test view mode validation."""
+        # Valid views
+        valid_views = ['day', 'week', 'month']
+        for view in valid_views:
+            settings = DisplaySettings(default_view=view)
+            self.assertEqual(settings.default_view, view)
+
+        # Invalid view
+        with self.assertRaises(ConfigValidationError):
+            DisplaySettings(default_view='invalid')
+
+    def test_version_compatibility(self):
+        """Test configuration version handling."""
+        # Test current version
+        config = CalendarConfig.load(self.config_path)
+        self.assertEqual(config.config_version, '1.0')
+
+        # Test loading older version
+        old_config = self.sample_config.copy()
+        old_config['config_version'] = '0.9'
+        with open(self.config_path, 'w') as f:
+            json.dump(old_config, f)
+        
+        config = CalendarConfig.load(self.config_path)
+        self.assertEqual(config.config_version, '1.0')  # Should upgrade
+
+    def test_malformed_json(self):
+        """Test handling of malformed JSON."""
+        # Test invalid JSON
+        with open(self.config_path, 'w') as f:
+            f.write('{"invalid": json}')
+        
+        with self.assertRaises(ConfigError):
+            CalendarConfig.load(self.config_path)
+
+    def test_missing_fields(self):
+        """Test handling of missing required fields."""
+        # Test missing required fields
+        invalid_configs = [
+            {},  # Empty config
+            {'calendar_sources': {}},  # Missing other sections
+            {'notifications': {'default_time': -1}},  # Invalid time
+        ]
+        
+        for invalid_config in invalid_configs:
+            with open(self.config_path, 'w') as f:
+                json.dump(invalid_config, f)
+            
+            with self.assertRaises((ConfigError, ConfigValidationError)):
+                CalendarConfig.load(self.config_path)
+
+    @patch('pathlib.Path.open', side_effect=PermissionError)
+    def test_file_permissions(self, mock_open):
+        """Test handling of file permission errors."""
+        with self.assertRaises(ConfigError):
+            CalendarConfig.load(self.config_path)
+
+    def test_custom_notification_times(self):
+        """Test custom notification time validation."""
+        settings = NotificationSettings()
+        
+        # Valid times
+        settings.custom_times['event1'] = timedelta(minutes=5)
+        settings.custom_times['event2'] = timedelta(hours=1)
+        
+        # Invalid times
+        with self.assertRaises(ConfigValidationError):
+            settings.custom_times['event3'] = timedelta(minutes=-5)
+
+    def test_config_serialization(self):
+        """Test configuration serialization/deserialization."""
+        original_config = CalendarConfig(
             calendar_sources={
                 'test': CalendarSource(
-                    url='http://test.com/calendar.ics',
-                    color='#0000FF',
+                    url='http://test.com',
+                    color='#FF0000',
                     enabled=True
                 )
             },
@@ -97,94 +170,44 @@ class TestConfig(unittest.TestCase):
             )
         )
         
-        # Save config
-        config.save(self.config_path)
+        # Save and reload
+        original_config.save(self.config_path)
+        loaded_config = CalendarConfig.load(self.config_path)
         
-        # Verify saved file
-        with open(self.config_path, 'r') as f:
-            saved_data = json.load(f)
-        
-        self.assertEqual(saved_data['calendar_sources']['test']['url'], 'http://test.com/calendar.ics')
-        self.assertEqual(saved_data['notifications']['default_time'], 900.0)  # 15 minutes in seconds
-        self.assertEqual(saved_data['display']['default_view'], 'month')
-
-    def test_invalid_config(self):
-        """Test handling of invalid configuration data."""
-        invalid_config = {
-            'calendar_sources': {
-                'source1': {
-                    'color': '#FF0000',  # Missing required 'url' field
-                    'enabled': True
-                }
-            }
-        }
-        
-        with open(self.config_path, 'w') as f:
-            json.dump(invalid_config, f)
-        
-        with self.assertRaises(ConfigValidationError):
-            CalendarConfig.load(self.config_path)
-
-    def test_missing_config(self):
-        """Test handling of missing configuration file."""
-        # Load non-existent config (should create default)
-        config = CalendarConfig.load(self.config_path)
-        
-        # Verify default values
-        self.assertEqual(len(config.calendar_sources), 0)
-        self.assertEqual(config.notifications.default_time, timedelta(minutes=10))
-        self.assertTrue(config.notifications.enabled)
-        self.assertEqual(config.display.default_view, 'week')
-        
-        # Verify file was created
-        self.assertTrue(self.config_path.exists())
-
-    def test_custom_notification_times(self):
-        """Test handling of custom notification times."""
-        config = CalendarConfig.load(self.config_path)
-        
-        # Add custom notification time
-        config.notifications.custom_times['test_event'] = timedelta(minutes=5)
-        config.save(self.config_path)
-        
-        # Reload and verify
-        reloaded = CalendarConfig.load(self.config_path)
+        # Verify equality
         self.assertEqual(
-            reloaded.notifications.custom_times['test_event'],
-            timedelta(minutes=5)
+            original_config.calendar_sources['test'].url,
+            loaded_config.calendar_sources['test'].url
+        )
+        self.assertEqual(
+            original_config.notifications.default_time,
+            loaded_config.notifications.default_time
+        )
+        self.assertEqual(
+            original_config.display.default_view,
+            loaded_config.display.default_view
         )
 
-    def test_config_validation(self):
-        """Test configuration validation."""
-        # Test invalid color format
-        with self.assertRaises(ConfigValidationError):
-            CalendarSource(
-                url='http://test.com/calendar.ics',
-                color='invalid_color',
-                enabled=True
-            )
-        
-        # Test invalid time format
-        with self.assertRaises(ConfigValidationError):
-            DisplaySettings(time_format='invalid_format')
-        
-        # Test invalid view mode
-        with self.assertRaises(ConfigValidationError):
-            DisplaySettings(default_view='invalid_view')
-
     def test_config_update(self):
-        """Test updating existing configuration."""
-        # Create initial config
+        """Test configuration updates."""
         config = CalendarConfig.load(self.config_path)
         
-        # Update settings
-        config.display.show_all_day_events = False
-        config.notifications.sound_enabled = False
-        config.save(self.config_path)
+        # Add new source
+        config.calendar_sources['new_source'] = CalendarSource(
+            url='http://new.com',
+            color='#00FF00'
+        )
         
-        # Reload and verify updates
+        # Update notification settings
+        config.notifications.default_time = timedelta(minutes=30)
+        config.notifications.sound_enabled = False
+        
+        # Save and verify
+        config.save(self.config_path)
         updated = CalendarConfig.load(self.config_path)
-        self.assertFalse(updated.display.show_all_day_events)
+        
+        self.assertEqual(len(updated.calendar_sources), 1)
+        self.assertEqual(updated.notifications.default_time, timedelta(minutes=30))
         self.assertFalse(updated.notifications.sound_enabled)
 
 if __name__ == '__main__':
